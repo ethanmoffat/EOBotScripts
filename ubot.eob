@@ -1,0 +1,152 @@
+$version = 28
+
+$accountName = "testuser"
+$accountPass = "testuser"
+
+print ("Logging in " + $accountName)
+$res = Login($accountName, $accountPass)
+
+print (time() + " " + $accountName + " login=" + $res)
+
+if ($res != 3) 
+{
+	print (":(")
+	goto end
+}
+
+LoginCharacter($accountName)
+
+sleep(1000)
+
+$character_name = ""
+$harrassed = array(0)
+$sleeps = 0
+
+while (true) {
+toploop:
+	Tick()
+
+	if ($character_name == "") {
+		$i = 0
+		while ($i < len($mapstate.$characters))
+		{			
+			$j = 0
+			while ($j < len($harrassed))
+			{
+				if ($harrassed[$j] == $mapstate.$characters[$i].$name)
+				{
+					goto checknextchar
+				}
+				$j = $j + 1
+			}
+
+			$sleeps = 0
+			$character_name = $mapstate.$characters[$i].$name
+
+checknextchar:
+			$i = $i + 1
+		}
+
+		if ($character_name == "") {
+			if ($sleeps == 6) {
+				print("anti-boring measure: resetting cached list of harrassed characters")
+				clear($harrassed)
+				$sleeps = 0
+			} else {
+				print ("no character found. sleeping...")
+				sleep(5000)
+				$sleeps = $sleeps + 1
+			}
+
+			goto toploop
+		}
+
+		print ("following: " + $character_name)
+		$counter = 0
+	}
+
+	if (len($mapstate.$characters) == 0)
+	{
+		print ("can't find " + $character_name + ", no longer following")
+		$character_name = ""
+		goto toploop
+	}
+	else
+	{
+		$i = 0
+		while ($i < len($mapstate.$characters))
+		{
+			if ($mapstate.$characters[$i].$name == $character_name)
+			{
+				$cobj = $mapstate.$characters[$i]
+				goto found
+			}
+
+			$i = $i + 1
+
+			if ($i == len($mapstate.$characters))
+			{
+				print ("can't find " + $character_name + ", no longer following")
+				$character_name = ""
+				goto toploop
+			}
+		}
+	}
+
+found:
+	$uRes = rand(0, 100)
+	if ($uRes >= 70)
+	{
+		if ($uRes < 90)
+			Chat("u")
+		else if ($uRes < 98)
+			Chat("uuuuu")
+		else {
+			Chat("uuuuuuuuuuuuu")
+			Attack()
+		}
+	}
+
+	$path = GetPathTo($cobj.$x - 1, $cobj.$y)
+	if (len($path) > 0)
+	{
+		$xdiff = $path[0].$x - $character.$x
+		$ydiff = $path[0].$y - $character.$y
+
+		if ($xdiff > 0)
+			$direction = 3 // right
+		else if ($xdiff < 0)
+			$direction = 1 // left
+		else if ($ydiff > 0)
+			$direction = 0 // down
+		else if ($ydiff < 0)
+			$direction = 2 // up
+
+		if ($direction != $character.$direction)
+		{
+			Face($direction)
+		}
+
+		Walk()
+		sleep(100)
+	}
+	else
+	{
+		$direction = 3
+		if ($direction != $character.$direction)
+			Face($direction)
+		sleep(1000)
+	}
+
+	$counter = $counter + 1
+
+	if ($counter >= 60)
+	{
+		append($harrassed, $character_name)
+		print ("harrassed " + $character_name + " long enough, stopping")
+
+		$counter = 0
+		$character_name = ""
+		goto toploop
+	}
+}

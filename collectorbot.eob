@@ -1,0 +1,483 @@
+$COLLECT_MAP_ID = 48
+
+$junkitems = [
+	238, // light katana
+	38,  // dark katana
+	144, // peasant suit
+	151, // peasant clothes
+	310, // frog head
+	"handcuff",
+	"buccanee",
+	"big fairysoda",
+	"captain boots",
+	"blue enchanted boots",
+	"red enchanted boots",
+	"green enchanted boots",
+	"ancient sword",
+	"dragon blade",
+	"reaper",
+	"reaper scyth",
+	"monster flesh",
+	"gob helm",
+	"horned gob helm",
+	"dragon armor",
+	"kontra",
+	"skeleton skull",
+	"cava staff",
+	"rapier",
+	"oblon armor"
+]
+
+$ignorenpcs = [
+	"crow",
+	"rat",
+	"apozen"
+]
+
+$healitems = [2, 4]
+$HEAL_SELF_ID = 1
+
+// ********
+// Connect/Login flow
+// ********
+$version = 1
+Connect($host, $port)
+$accountName = $args[0]
+$accountPass = $args[1]
+print ("Logging in " + $accountName)
+$res = Login($accountName, $accountPass)
+if ($res != 3) error("Login failed with code=" + $res)
+print (time() + " " + $accountName)
+$characterName = $args[2]
+LoginCharacter($characterName)
+sleep(1000)
+
+// *******
+// Variable initialization
+// *******
+$walkToIndex = 0
+$ENABLE_WALK_TO_POINTS = true
+$walkToPoints = [
+	{ $x = 10, $y = 10 },
+	{ $x = $map.$width - 10, $y = 10 },
+	//{ $x = $map.$width - 10, $y = $map.$height - 27 },
+	//{ $x = 10, $y = $map.$height - 27 }
+	{ $x = $map.$width - 10, $y = $map.$height - 10 },
+	{ $x = 10, $y = $map.$height - 10 }
+]
+
+for ($ndx = 0; $ndx < len($walkToPoints); $ndx++) {
+	$walkPoint = $walkToPoints[$ndx]
+
+	$coordtoggle = false
+	$path = GetPathTo($walkPoint.$x, $walkPoint.$y)
+	while (len($path) == 0) {
+		if ($ndx == 0) {
+			if ($coordtoggle) {
+				$walkPoint.$x = $walkPoint.$x + 1
+			} else {
+				$walkPoint.$y = $walkPoint.$y + 1
+			}
+		} else if ($ndx == 1) {
+			if ($coordtoggle) {
+				$walkPoint.$x = $walkPoint.$x - 1
+			} else {
+				$walkPoint.$y = $walkPoint.$y + 1
+			}
+		} else if ($ndx == 2) {
+			if ($coordtoggle) {
+				$walkPoint.$x = $walkPoint.$x - 1
+			} else {
+				$walkPoint.$y = $walkPoint.$y - 1
+			}
+		} else if ($ndx == 3) {
+			if ($coordtoggle) {
+				$walkPoint.$x = $walkPoint.$x + 1
+			} else {
+				$walkPoint.$y = $walkPoint.$y - 1
+			}
+		}
+
+		$coordtoggle = !$coordtoggle
+		$path = GetPathTo($walkPoint.$x, $walkPoint.$y)
+	}
+
+	print ("walkPoints[" + $ndx + "]: (" + $walkPoint.$x + ", " + $walkPoint.$y + ")")
+}
+
+$target_index = -1
+$walk_index = 0
+$attacks = 0
+$other_chars = 0
+$mindist = 1000
+
+$NO_PATH_TO_COLLECT_MAP = false
+$NO_HEAL_ITEMS = false
+
+while (true) {
+	Tick()
+
+	// *******
+	// Check for other characters; warn
+	// *******
+	if (len($mapstate.$characters) != $other_chars) {
+		$other_chars = len($mapstate.$characters)
+		if (len($mapstate.$characters) == 0) {
+			print("**********   Map is empty    **********")
+		} else {
+			print("********** Map is not empty! **********")
+		}
+
+		beep(220, 500)
+		beep(247, 500)
+		beep(220, 500)
+	}
+
+	// *******
+	// Path back to target map if we accidentally walk to another one
+	// *******
+	if ($map.$id != $COLLECT_MAP_ID && !$NO_PATH_TO_COLLECT_MAP) {
+		print("walking back to the right map (at: " + $map.$id + ")")
+
+		$found = false
+		foreach($warp in $map.$warps) {
+			if ($warp.$map == $COLLECT_MAP_ID) {
+				$found = true
+
+				$path = GetPathTo($warp.$x, $warp.$y)
+				while (len($path) > 0 && $map.$id != $COLLECT_MAP_ID) {
+					print("Walking to warp " + $warp.$x + ", " + $warp.$y + " (at: " + $character.$x + ", " + $character.$y + ") (remaining: " + len($path) + " points)")
+
+					$xdiff = $path[0].$x - $character.$x
+					$ydiff = $path[0].$y - $character.$y
+
+					if ($xdiff > 0)
+						$direction = 3 // right
+					else if ($xdiff < 0)
+						$direction = 1 // left
+					else if ($ydiff > 0)
+						$direction = 0 // down
+					else if ($ydiff < 0)
+						$direction = 2 // up
+
+					if ($direction != $character.$direction) {
+						Face($direction)
+					}
+
+					if (!Walk()) {
+						// todo: kill adjacent NPCs until they're all gone
+					} else {
+						$path = GetPathTo($warp.$x, $warp.$y)
+					}
+				}
+
+				break
+			}
+		}
+
+		if (!$found) {
+			print("No path back to the right map. Staying on map " + $map.$id)
+			$NO_PATH_TO_COLLECT_MAP = true
+		}
+	}
+
+	// *******
+	// Restore health to over 80% if < 20%
+	// *******
+	if (!$NO_HEAL_ITEMS && ($character.$stats.$hp * 100) / $character.$stats.$maxhp < 20) {
+		print("HP is low; healing")
+		$found = false
+		foreach($item in $character.$inventory) {
+			if (contains($healitems, $item.$id)) {
+				$found = true
+				for ($i = $item.$amount; $i > 0 && ($character.$stats.$hp * 100) / $character.$stats.$maxhp < 66; $i--) {
+					UseItem($item.$id)
+					sleep(100)
+				}
+				break
+			}
+		}
+
+		if (!$found) {
+			print("No heal items remaining! You might die.")
+			$NO_HEAL_ITEMS = true
+		}
+	}
+
+	while ($attacks == 0 && $character.$stats.$tp > 0 && ($character.$stats.$hp * 100) / $character.$stats.$maxhp < 50) {
+		Cast($HEAL_SELF_ID)
+	}
+
+	// *******
+	// Find the index of the closest NPC by path length
+	// *******
+	if (len($mapstate.$npcs) > 0) {
+		$old_target = $target_index
+
+		$path = []
+		$dist = 1000
+
+		if ($target)
+			$target_dist = abs($target.$x - $character.$x) + abs($target.$y - $character.$y)
+		else
+			$target_dist = 1000
+
+		foreach($npc in $mapstate.$npcs) {
+			if (!$npc.$ismonster || contains($ignorenpcs, lower($npc.$name))) {
+				continue
+			}
+
+			$pts = [
+				{ $x = $npc.$x, $y = $npc.$y - 1 },
+				{ $x = $npc.$x + 1, $y = $npc.$y },
+				{ $x = $npc.$x, $y = $npc.$y + 1 },
+				{ $x = $npc.$x - 1, $y = $npc.$y }
+			]
+
+			foreach($pt in $pts) {
+				if ($pt.$x == $character.$x && $pt.$y == $character.$y && $target_dist != 1) {
+					$mindist = 0
+					$target_index = $npc.$index
+					$npc_name = $npc.$name
+					break
+				}
+
+				$path = GetPathToAvoidingWarps($pt.$x, $pt.$y)
+				$dist = len($path)
+
+				if ($dist < $mindist && $dist > 0) {
+					$mindist = $dist
+					$target_index = $npc.$index
+					$npc_name = $npc.$name
+
+					break
+				}
+			}
+		}
+
+		if ($target_index >= 0) {
+			if ($old_target != $target_index && $old_target >= 0) {
+				print("Targeting closer NPC: " + $target_index + " (" + $npc_name + ")")
+			} else if ($old_target < 0) {
+				print("Targeting index: " + $target_index + " (" + $npc_name + ")")
+			}
+		}
+	}
+
+	// *******
+	// Map the targeted NPC index to the $target variable
+	// *******
+	$found = false
+	if ($target_index >= 0) {
+		foreach($npc in $mapstate.$npcs) {
+			if ($npc.$index == $target_index) {
+				$target = $npc
+				$found = true
+				break
+			}
+		}
+	}
+
+	// *******
+	// Do one of:
+	// 1. If found, walk/face towards NPC, attack when adjacent
+	// 2. If not found by still have an index, reset the follow index, pickup/junk items
+	// 3. Otherwise, walk to a map point OR sleep depending on configuration
+	// *******
+	if ($found) {
+		$abs_xdiff = abs($character.$x - $target.$x)
+		$abs_ydiff = abs($character.$y - $target.$y)
+		if (($abs_xdiff == 0 && $abs_ydiff == 1) || ($abs_xdiff == 1 && $abs_ydiff == 0)) {
+			$xdiff = $target.$x - $character.$x
+			$ydiff = $target.$y - $character.$y
+
+			if ($ydiff > 0)
+				$direction = 0 // down
+			else if ($xdiff < 0)
+				$direction = 1 // left
+			else if ($ydiff < 0)
+				$direction = 2 // up
+			else if ($xdiff > 0)
+				$direction = 3 // right
+
+			if ($direction != $character.$direction) {
+				Face($direction)
+			}
+
+			print("Attacking (facing " + $character.$direction + ", at " + $character.$x + "," + $character.$y + ")")
+			Attack()
+			$attacks = $attacks + 1
+
+			// ********
+			// Every 10 attacks for the same NPC, kill any mob NPCs
+			// ********
+			//if ($attacks % 10 == 0) {
+			if (false) {
+				print("Checking for mob NPCs...")
+
+				for ($dir = 0; $dir <= 3; $dir = $dir + 1) {
+					if ($dir == $direction) continue
+
+					if ($dir == 0) {
+						$state = GetCellState($character.$x, $character.$y + 1)
+					} else if ($dir == 1) {
+						$state = GetCellState($character.$x - 1, $character.$y)
+					} else if ($dir == 2) {
+						$state = GetCellState($character.$x, $character.$y - 1)
+					} else if ($dir == 3) {
+						$state = GetCellState($character.$x + 1, $character.$y)
+					} else {
+						error("Interpreter error: invalid direction " + $dir)
+					}
+
+					if ($state.$npc) {
+						print("Attacking mob NPC " + $state.$npc.$name + " at direction " + $dir)
+					}
+
+					$mobattacks = 0
+					while ($state.$npc) {
+						Face($dir)
+						Attack()
+
+						if ($dir == 0) {
+							$state = GetCellState($character.$x, $character.$y + 1)
+						} else if ($dir == 1) {
+							$state = GetCellState($character.$x - 1, $character.$y)
+						} else if ($dir == 2) {
+							$state = GetCellState($character.$x, $character.$y - 1)
+						} else if ($dir == 3) {
+							$state = GetCellState($character.$x + 1, $character.$y)
+						} else {
+							error("Interpreter error: invalid direction " + $dir)
+						}
+
+						$mobattacks = $mobattacks + 1
+						if ($mobattacks >= 10) {
+							print("skipping this mob npc, it's too healthy")
+							break
+						}
+					}
+				}
+			}
+		} else {
+			$pts = [
+				{ $x = $target.$x, $y = $target.$y - 1 },
+				{ $x = $target.$x + 1, $y = $target.$y },
+				{ $x = $target.$x, $y = $target.$y + 1 },
+				{ $x = $target.$x - 1, $y = $target.$y }
+			]
+
+			foreach($pt in $pts) {
+				$path = GetPathToAvoidingWarps($pt.$x, $pt.$y)
+				if (len($path) > 0)
+					break
+			}
+
+			if (len($path) > 0) {
+				$xdiff = $path[0].$x - $character.$x
+				$ydiff = $path[0].$y - $character.$y
+
+				if ($ydiff > 0)
+					$direction = 0 // down
+				else if ($xdiff < 0)
+					$direction = 1 // left
+				else if ($ydiff < 0)
+					$direction = 2 // up
+				else if ($xdiff > 0)
+					$direction = 3 // right
+
+				if ($direction != $character.$direction) {
+					Face($direction)
+				}
+
+				print("Walking to: " + $target.$x + "," + $target.$y + " (at: " + $character.$x + "," + $character.$y + ")")
+				Walk()
+			} else {
+				//if (len($mapstate.$npcs) > 0) {
+				//	print("There might be an NPC at your position")
+				//	// todo: check for mob NPCs here
+				//}
+
+				print("No path to NPC, resetting target")
+				print("character=" + $character.$x + "," + $character.$y + " | npc=" + $target.$x + "," + $target.$y)
+				sleep(1000)
+
+				$target_index = -1
+				$mindist = 1000
+				$attacks = 0
+			}
+		}
+	} else if ($target_index >= 0) {
+		print("NPC is gone. Unfollowing.")
+		$target_index = -1
+		$mindist = 1000
+		$attacks = 0
+
+		foreach($item in $mapstate.$items) {
+			if (abs($item.$x - $character.$x) <= 2 && abs($item.$y - $character.$y) <= 2) {
+				print("Picked up " + $item.$name + " x" + $item.$amount)
+				Pickup($item.$index)
+			}
+		}
+
+		foreach($item in $character.$inventory) {
+			if (contains($junkitems, $item.$id) || contains($junkitems, lower($item.$name))) {
+				print("Junking " + $item.$name + " x" + $item.$amount)
+				Junk($item.$id, $item.$amount)
+			}
+		}
+
+		if ($character.$stats.$weight >= $character.$stats.$maxweight) {
+			print("Inventory full. Sitting.")
+			Sit()
+			break
+		}
+	} else if (len($walkToPoints) > 0 && $ENABLE_WALK_TO_POINTS) {
+		$target = $walkToPoints[$walk_index]
+		$path = GetPathToAvoidingWarps($target.$x, $target.$y)
+		if (len($path) > 0) {
+			print("Walking to map point " + $target.$x + ", " + $target.$y + " (at: " + $character.$x + ", " + $character.$y + ")")
+
+			$xdiff = $path[0].$x - $character.$x
+			$ydiff = $path[0].$y - $character.$y
+
+			if ($xdiff > 0)
+				$direction = 3 // right
+			else if ($xdiff < 0)
+				$direction = 1 // left
+			else if ($ydiff > 0)
+				$direction = 0 // down
+			else if ($ydiff < 0)
+				$direction = 2 // up
+
+			if ($direction != $character.$direction) {
+				Face($direction)
+			}
+
+			Walk()
+		} else {
+			print("Made it to point " + $walk_index + ". Getting next point.")
+			$walk_index = ($walk_index + 1) % len($walkToPoints)
+			sleep(1000)
+		}
+	} else {
+		if (len($mapstate.$npcs) > 0) {
+			print("There might be an NPC at your position")
+		}
+
+		print ("Nothing to do. Sleeping...")
+		sleep(1000)
+	}
+}
+
+print (time())
+
+for ($i = 0; $i < 60; $i++) {
+	Tick()
+
+	if ($i % 5 == 0) {
+		print ("Needs intervention...")
+	}
+
+	sleep(1000)
+}
