@@ -37,75 +37,22 @@ $ignorenpcs = [
 $healitems = [2, 4]
 $HEAL_SELF_ID = 1
 
-// ********
-// Connect/Login flow
-// ********
-$version = 1
-Connect($host, $port)
-$accountName = $args[0]
-$accountPass = $args[1]
-print ("Logging in " + $accountName)
-$res = Login($accountName, $accountPass)
-if ($res != 3) error("Login failed with code=" + $res)
-print (time() + " " + $accountName)
-$characterName = $args[2]
-LoginCharacter($characterName)
-sleep(1000)
+if (!DoLoginFlow($args[0], $args[1], $args[2])) {
+	error("Login failed. Exiting.")
+}
 
 // *******
 // Variable initialization
 // *******
 $walkToIndex = 0
 $ENABLE_WALK_TO_POINTS = true
-$walkToPoints = [
-	{ $x = 10, $y = 10 },
-	{ $x = $map.$width - 10, $y = 10 },
-	//{ $x = $map.$width - 10, $y = $map.$height - 27 },
-	//{ $x = 10, $y = $map.$height - 27 }
-	{ $x = $map.$width - 10, $y = $map.$height - 10 },
-	{ $x = 10, $y = $map.$height - 10 }
-]
 
-for ($ndx = 0; $ndx < len($walkToPoints); $ndx++) {
-	$walkPoint = $walkToPoints[$ndx]
-
-	$coordtoggle = false
-	$path = GetPathTo($walkPoint.$x, $walkPoint.$y)
-	while (len($path) == 0) {
-		if ($ndx == 0) {
-			if ($coordtoggle) {
-				$walkPoint.$x = $walkPoint.$x + 1
-			} else {
-				$walkPoint.$y = $walkPoint.$y + 1
-			}
-		} else if ($ndx == 1) {
-			if ($coordtoggle) {
-				$walkPoint.$x = $walkPoint.$x - 1
-			} else {
-				$walkPoint.$y = $walkPoint.$y + 1
-			}
-		} else if ($ndx == 2) {
-			if ($coordtoggle) {
-				$walkPoint.$x = $walkPoint.$x - 1
-			} else {
-				$walkPoint.$y = $walkPoint.$y - 1
-			}
-		} else if ($ndx == 3) {
-			if ($coordtoggle) {
-				$walkPoint.$x = $walkPoint.$x + 1
-			} else {
-				$walkPoint.$y = $walkPoint.$y - 1
-			}
-		}
-
-		$coordtoggle = !$coordtoggle
-		$path = GetPathTo($walkPoint.$x, $walkPoint.$y)
-	}
-
-	print ("walkPoints[" + $ndx + "]: (" + $walkPoint.$x + ", " + $walkPoint.$y + ")")
+$walkToPoints = GetWalkToPoints()
+foreach ($point in $walkToPoints) {
+	print ("walkPoints[" + $ndx + "]: (" + $point.$x + ", " + $point.$y + ")")
 }
 
-$target_index = -1
+$target = undefined
 $walk_index = 0
 $attacks = 0
 $other_chars = 0
@@ -212,7 +159,7 @@ while (true) {
 	// Find the index of the closest NPC by path length
 	// *******
 	if (len($mapstate.$npcs) > 0) {
-		$old_target = $target_index
+		$old_target = $target
 
 		$path = []
 		$dist = 1000
@@ -222,7 +169,7 @@ while (true) {
 		else
 			$target_dist = 1000
 
-		foreach($npc in $mapstate.$npcs) {
+		foreach ($npc in $mapstate.$npcs) {
 			if (!$npc.$ismonster || contains($ignorenpcs, lower($npc.$name))) {
 				continue
 			}
@@ -237,8 +184,7 @@ while (true) {
 			foreach($pt in $pts) {
 				if ($pt.$x == $character.$x && $pt.$y == $character.$y && $target_dist != 1) {
 					$mindist = 0
-					$target_index = $npc.$index
-					$npc_name = $npc.$name
+					$target = $npc
 					break
 				}
 
@@ -247,32 +193,31 @@ while (true) {
 
 				if ($dist < $mindist && $dist > 0) {
 					$mindist = $dist
-					$target_index = $npc.$index
-					$npc_name = $npc.$name
+					$target = $npc
 
 					break
 				}
 			}
 		}
 
-		if ($target_index >= 0) {
-			if ($old_target != $target_index && $old_target >= 0) {
-				print("Targeting closer NPC: " + $target_index + " (" + $npc_name + ")")
-			} else if ($old_target < 0) {
-				print("Targeting index: " + $target_index + " (" + $npc_name + ")")
+		if ($target != undefined) {
+			if ($old_target == undefined) {
+				print("Targeting index: " + $target.$index + " (" + $target.$name + ")")
+			} else if ($target.$index != $old_target.$index) {
+				print("Targeting closer NPC: " + $target.$index + " (" + $target.$name + ")")
 			}
 		}
 	}
 
 	// *******
-	// Map the targeted NPC index to the $target variable
+	// Make sure the target is still on the map
 	// *******
 	$found = false
-	if ($target_index >= 0) {
-		foreach($npc in $mapstate.$npcs) {
-			if ($npc.$index == $target_index) {
-				$target = $npc
+	if ($target != undefined) {
+		foreach ($npc in $mapstate.$npcs) {
+			if ($npc.$index == $target.$index) {
 				$found = true
+				$target = $npc
 				break
 			}
 		}
@@ -287,24 +232,9 @@ while (true) {
 	if ($found) {
 		$abs_xdiff = abs($character.$x - $target.$x)
 		$abs_ydiff = abs($character.$y - $target.$y)
-		if (($abs_xdiff == 0 && $abs_ydiff == 1) || ($abs_xdiff == 1 && $abs_ydiff == 0)) {
-			$xdiff = $target.$x - $character.$x
-			$ydiff = $target.$y - $character.$y
-
-			if ($ydiff > 0)
-				$direction = 0 // down
-			else if ($xdiff < 0)
-				$direction = 1 // left
-			else if ($ydiff < 0)
-				$direction = 2 // up
-			else if ($xdiff > 0)
-				$direction = 3 // right
-
-			if ($direction != $character.$direction) {
-				Face($direction)
-			}
-
-			print("Attacking (facing " + $character.$direction + ", at " + $character.$x + "," + $character.$y + ")")
+		if ($abs_xdiff + $abs_ydiff == 1) {
+			FacePoint($target)
+			print("Attacking (facing " + $character.$direction + ", at " + $character.$x + "," + $character.$y + ")" + " (target: " + $target.$x + "," + $target.$y + ")")
 			Attack()
 			$attacks = $attacks + 1
 
@@ -367,60 +297,46 @@ while (true) {
 				{ $x = $target.$x - 1, $y = $target.$y }
 			]
 
-			foreach($pt in $pts) {
+			foreach ($pt in $pts) {
 				$path = GetPathToAvoidingWarps($pt.$x, $pt.$y)
 				if (len($path) > 0)
 					break
 			}
 
 			if (len($path) > 0) {
-				$xdiff = $path[0].$x - $character.$x
-				$ydiff = $path[0].$y - $character.$y
-
-				if ($ydiff > 0)
-					$direction = 0 // down
-				else if ($xdiff < 0)
-					$direction = 1 // left
-				else if ($ydiff < 0)
-					$direction = 2 // up
-				else if ($xdiff > 0)
-					$direction = 3 // right
-
-				if ($direction != $character.$direction) {
-					Face($direction)
-				}
-
 				print("Walking to: " + $target.$x + "," + $target.$y + " (at: " + $character.$x + "," + $character.$y + ")")
-				Walk()
+				OneStepCloser($path[0])
 			} else {
-				//if (len($mapstate.$npcs) > 0) {
-				//	print("There might be an NPC at your position")
-				//	// todo: check for mob NPCs here
-				//}
+				foreach ($npc in $mapstate.$npcs) {
+					if ($npc.$x == $character.$x && $npc.$y == $character.$y) {
+						print("*** There is an NPC at your position ***")
+						break
+					}
+				}
 
 				print("No path to NPC, resetting target")
 				print("character=" + $character.$x + "," + $character.$y + " | npc=" + $target.$x + "," + $target.$y)
 				sleep(1000)
 
-				$target_index = -1
+				$target = undefined
 				$mindist = 1000
 				$attacks = 0
 			}
 		}
-	} else if ($target_index >= 0) {
+	} else if ($target != undefined) {
 		print("NPC is gone. Unfollowing.")
-		$target_index = -1
+		$target = undefined
 		$mindist = 1000
 		$attacks = 0
 
-		foreach($item in $mapstate.$items) {
+		foreach ($item in $mapstate.$items) {
 			if (abs($item.$x - $character.$x) <= 2 && abs($item.$y - $character.$y) <= 2) {
 				print("Picked up " + $item.$name + " x" + $item.$amount)
 				Pickup($item.$index)
 			}
 		}
 
-		foreach($item in $character.$inventory) {
+		foreach ($item in $character.$inventory) {
 			if (contains($junkitems, $item.$id) || contains($junkitems, lower($item.$name))) {
 				print("Junking " + $item.$name + " x" + $item.$amount)
 				Junk($item.$id, $item.$amount)
@@ -433,28 +349,11 @@ while (true) {
 			break
 		}
 	} else if (len($walkToPoints) > 0 && $ENABLE_WALK_TO_POINTS) {
-		$target = $walkToPoints[$walk_index]
-		$path = GetPathToAvoidingWarps($target.$x, $target.$y)
+		$walkPoint = $walkToPoints[$walk_index]
+		$path = GetPathToAvoidingWarps($walkPoint.$x, $walkPoint.$y)
 		if (len($path) > 0) {
-			print("Walking to map point " + $target.$x + ", " + $target.$y + " (at: " + $character.$x + ", " + $character.$y + ")")
-
-			$xdiff = $path[0].$x - $character.$x
-			$ydiff = $path[0].$y - $character.$y
-
-			if ($xdiff > 0)
-				$direction = 3 // right
-			else if ($xdiff < 0)
-				$direction = 1 // left
-			else if ($ydiff > 0)
-				$direction = 0 // down
-			else if ($ydiff < 0)
-				$direction = 2 // up
-
-			if ($direction != $character.$direction) {
-				Face($direction)
-			}
-
-			Walk()
+			print("Walking to map point " + $walkPoint.$x + ", " + $walkPoint.$y + " (at: " + $character.$x + ", " + $character.$y + ")")
+			OneStepCloser($path[0])
 		} else {
 			print("Made it to point " + $walk_index + ". Getting next point.")
 			$walk_index = ($walk_index + 1) % len($walkToPoints)
@@ -480,4 +379,98 @@ for ($i = 0; $i < 60; $i++) {
 	}
 
 	sleep(1000)
+}
+
+func DoLoginFlow($accountName, $accountPass, $characterName) {
+	$version = 1
+	Connect($host, $port)
+
+	print ("Logging in " + $accountName)
+
+	$res = Login($accountName, $accountPass)
+
+	if ($res != 3) {
+		return false
+	}
+
+	print (time() + " " + $accountName)
+	LoginCharacter($characterName)
+
+	sleep(1000)
+
+	return true
+}
+
+func GetWalkToPoints() {
+	$x_offset = min($map.$width / 4, 10)
+	$y_offset = min($map.$height / 4, 10)
+
+	$walkToPoints = [
+		{ $x = $x_offset, $y = $y_offset },
+		{ $x = $map.$width - $x_offset, $y = $y_offset },
+		{ $x = $map.$width - $x_offset, $y = $map.$height - $y_offset },
+		{ $x = $x_offset, $y = $map.$height - $y_offset }
+	]
+
+	for ($ndx = 0; $ndx < len($walkToPoints); $ndx++) {
+		$walkPoint = $walkToPoints[$ndx]
+
+		$coordtoggle = false
+		$path = GetPathTo($walkPoint.$x, $walkPoint.$y)
+		while (len($path) == 0) {
+			if ($ndx == 0) {
+				if ($coordtoggle) {
+					$walkPoint.$x = $walkPoint.$x + 1
+				} else {
+					$walkPoint.$y = $walkPoint.$y + 1
+				}
+			} else if ($ndx == 1) {
+				if ($coordtoggle) {
+					$walkPoint.$x = $walkPoint.$x - 1
+				} else {
+					$walkPoint.$y = $walkPoint.$y + 1
+				}
+			} else if ($ndx == 2) {
+				if ($coordtoggle) {
+					$walkPoint.$x = $walkPoint.$x - 1
+				} else {
+					$walkPoint.$y = $walkPoint.$y - 1
+				}
+			} else if ($ndx == 3) {
+				if ($coordtoggle) {
+					$walkPoint.$x = $walkPoint.$x + 1
+				} else {
+					$walkPoint.$y = $walkPoint.$y - 1
+				}
+			}
+
+			$coordtoggle = !$coordtoggle
+			$path = GetPathTo($walkPoint.$x, $walkPoint.$y)
+		}
+	}
+
+	return $walkToPoints
+}
+
+func FacePoint($point) {
+	$xdiff = $point.$x - $character.$x
+	$ydiff = $point.$y - $character.$y
+
+	if ($xdiff > 0)
+		$direction = 3 // right
+	else if ($xdiff < 0)
+		$direction = 1 // left
+	else if ($ydiff > 0)
+		$direction = 0 // down
+	else if ($ydiff < 0)
+		$direction = 2 // up
+
+	if ($direction != $character.$direction) {
+		Face($direction)
+	}
+}
+
+func OneStepCloser($point) {
+	FacePoint($point)
+	Walk()
 }
