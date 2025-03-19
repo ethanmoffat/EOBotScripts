@@ -1,0 +1,77 @@
+
+$fileContent = readall("D:\git\personal\EOBotScripts\warplist.txt")
+
+$warpGraph = dict()
+foreach ($fileLine in $fileContent) {
+    if (len(trim($fileLine)) == 0) {
+        continue
+    }
+
+    $mapid = GetMapID($fileLine)
+    $targets = GetTargetList($fileLine)
+    $warpGraph[$mapid] = $targets
+}
+
+$SOURCE = "71"
+$DEST = "163"
+
+$parents = dict()
+$distances = dict()
+foreach ($entry in $warpGraph) {
+    $distances[$entry.$key] = 1000
+}
+
+$candidates = [ $SOURCE ]
+$distances[$SOURCE] = 0
+
+while (len($candidates) > 0) {
+    $next = $candidates[0]
+    removeat($candidates, 0)
+
+    foreach ($neighbor in $warpGraph[$next]) {
+        if ($distances[$neighbor] == 1000) {
+            $parents[$neighbor] = $next
+            $distances[$neighbor] = $distances[$next] + 1
+            append($candidates, $neighbor)
+        }
+    }
+}
+
+if ($distances[$DEST] == 1000) {
+    error("No path found from " + $SOURCE + " to " + $DEST)
+}
+
+$path = [ $DEST ]
+$current = $DEST
+while ($parents[$current]) {
+    insert($path, 0, $parents[$current])
+    $current = $parents[$current]
+}
+
+print ("Shortest path from " + $SOURCE + " to " + $DEST + ":")
+print ($path)
+
+func GetMapID($fileLine) {
+    $parts = split($fileLine, "=")
+
+    if (len($parts) != 2) {
+        error("Expected an equals sign in file line: " + $fileLine)
+    }
+
+    return trim($parts[0])
+}
+
+func GetTargetList($fileLine) {
+    $parts = split($fileLine, "=")
+
+    if (len($parts) != 2) {
+        error("Expected an equals sign in file line: " + $fileLine)
+    }
+
+    $targets = split($parts[1], ",")
+    for ($i = 0; $i < len($targets); $i++) {
+        $targets[$i] = trim($targets[$i])
+    }
+
+    return $targets
+}
